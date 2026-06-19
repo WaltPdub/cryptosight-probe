@@ -1,43 +1,27 @@
-# ── Stage 1: build ────────────────────────────────────────────────────────────
-# Use Debian-based builder — gopacket's CGO pcap bindings rely on <pcap.h>
-# being on the standard include path, which Debian's libpcap-dev satisfies
-# cleanly.  Alpine puts headers under pcap/pcap.h and has historically caused
-# silent CGO link failures with gopacket v1.1.19.
-FROM golang:1.22-bookworm AS builder
+# ── CryptoSight On-Prem Probe ─────────────────────────────────────────────────
+# Pure-Python implementation — no Go, no CGO, no compilation step.
+# Scapy uses ctypes to bind to libpcap at runtime (passive sniffer mode only);
+# no C headers are required at build time.
+FROM python:3.12-slim
 
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-ARG GIT_COMMIT=dev
+ARG PROBE_VERSION=dev
 
+# libpcap is required at runtime when passiveSniffer: true.
+# It is a small shared library (~200 kB) — safe to include unconditionally.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpcap-dev gcc ca-certificates git \
+        libpcap-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build
+WORKDIR /app
 
-COPY go.mod ./
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-ENV GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-mod=mod
-RUN go mod download
+COPY *.py ./
 
-COPY . .
-
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build \
-    -ldflags="-s -w -X main.version=${GIT_COMMIT}" \
-    -o /probe .
-
-# ── Stage 2: minimal Alpine runtime ───────────────────────────────────────────
-FROM alpine:3.19
-
-RUN apk add --no-cache libpcap ca-certificates && \
-    addgroup -S probe && \
-    adduser  -S probe -G probe
-
-COPY --from=builder /probe /probe
+# Stamp the version so logs show the image tag.
+ENV PROBE_VERSION=${PROBE_VERSION}
 
 VOLUME ["/config"]
 
-USER probe:probe
-
-ENTRYPOINT ["/probe"]
+ENTRYPOINT ["python", "/app/main.py"]
