@@ -6,7 +6,6 @@ Any non-2xx final response is raised as an exception.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Optional
@@ -29,6 +28,7 @@ def send(
     assets: list[DiscoveredAsset],
     *,
     sniffer_stats: Optional[SnifferStats] = None,
+    ssl_verify: bool = True,
 ) -> dict:
     """POST assets to <endpoint>/probes/ingest and return the parsed response."""
     url = endpoint.rstrip("/") + "/probes/ingest"
@@ -51,7 +51,9 @@ def send(
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            resp = requests.post(
+                url, json=payload, headers=headers, timeout=30, verify=ssl_verify
+            )
             if resp.ok:
                 try:
                     return resp.json()
