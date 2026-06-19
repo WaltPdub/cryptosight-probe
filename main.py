@@ -78,6 +78,11 @@ def main() -> None:
         )
         sniffer_thread.start()
 
+    # ── Startup heartbeat ───────────────────────────────────────────────────
+    # Send an empty ingest immediately so the server marks this probe Online
+    # even before the first scan cycle completes.
+    _send_heartbeat(cfg)
+
     # ── Active scan + cert-store cycle ─────────────────────────────────────
     needs_cycle = (cfg.mode.active_scan and cfg.scan.networks) or cfg.cert_store.enabled
 
@@ -97,6 +102,14 @@ def main() -> None:
             if not cfg.mode.passive_sniffer:
                 logger.info("INFO: probe stopped")
                 return
+    else:
+        logger.warning(
+            "WARN: no scan targets configured (scan.networks is empty and certStore.enabled is false). "
+            "Add CIDR ranges under scan.networks in config.yaml to start discovering assets. "
+            "The probe will keep sending heartbeats every 5 minutes to stay Online."
+        )
+        # Keep running so heartbeats continue — user can update config and restart.
+        _heartbeat_loop(cfg, stop_event)
 
     # Block until SIGTERM/SIGINT.
     stop_event.wait()
@@ -105,6 +118,22 @@ def main() -> None:
         sniffer_thread.join(timeout=15)
 
     logger.info("INFO: probe stopped")
+
+
+def _send_heartbeat(cfg: Config) -> None:
+    """POST an empty asset list so the server updates lastSeenAt."""
+    hostname = socket.gethostname()
+    try:
+        sender_mod.send(cfg.probe.endpoint, cfg.probe.api_key, VERSION, hostname, [])
+        logger.info("INFO: heartbeat sent — probe is Online in CryptoSight")
+    except Exception as e:
+        logger.warning("WARN: heartbeat failed: %s — check endpoint and apiKey in config.yaml", e)
+
+
+def _heartbeat_loop(cfg: Config, stop_event: threading.Event, interval: int = 300) -> None:
+    """Send a heartbeat every `interval` seconds until stop_event is set."""
+    while not stop_event.wait(timeout=interval):
+        _send_heartbeat(cfg)
 
 
 def _run_cycle(cfg: Config) -> Exception | None:
@@ -131,10 +160,6 @@ def _run_cycle(cfg: Config) -> Exception | None:
             assets.extend(found)
         except Exception as e:
             logger.warning("WARN: cert store scan error: %s", e)
-
-    if not assets:
-        logger.info("INFO: no assets discovered this cycle — nothing to send")
-        return None
 
     logger.info("INFO: sending %d asset(s) to %s", len(assets), cfg.probe.endpoint)
     try:
