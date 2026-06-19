@@ -17,13 +17,10 @@ Requires CAP_NET_ADMIN + CAP_NET_RAW (see docker-compose.yml).
 from __future__ import annotations
 
 import logging
-import os
 import socket
 import struct
 import threading
-import time
 from datetime import datetime, timezone
-from typing import Optional
 
 from assets import DiscoveredAsset, SnifferStats
 from cert_utils import parse_der_cert
@@ -38,16 +35,40 @@ _TLS_HANDSHAKE = 22
 _HS_CERTIFICATE = 11
 
 
+def _pick_interface(preferred: str) -> str:
+    """Return *preferred* if it is available, else the first real non-loopback interface."""
+    try:
+        from scapy.all import get_if_list  # type: ignore
+        available = get_if_list()
+    except Exception:
+        return preferred
+
+    if preferred in available:
+        return preferred
+
+    # 'any' is a libpcap pseudo-interface that is not always present (e.g.
+    # Docker Desktop / WSL2).  Fall back to the first real interface.
+    candidates = [i for i in available if i not in ("lo", "any", "")]
+    fallback = candidates[0] if candidates else "eth0"
+    logger.warning(
+        "WARN: interface %r not available on this host. "
+        "Falling back to %r. "
+        "Set sniffer.interface: %s in config.yaml to suppress this message.",
+        preferred, fallback, fallback,
+    )
+    return fallback
+
+
 def run(cfg: Config, probe_version: str, stop_event: threading.Event) -> None:
     """Block until stop_event is set, capturing and flushing TLS assets."""
     try:
-        from scapy.all import sniff, TCP, IP, conf as scapy_conf  # type: ignore
+        from scapy.all import sniff, conf as scapy_conf  # type: ignore
         scapy_conf.verb = 0
     except ImportError:
         logger.error("scapy is not installed — passive sniffer cannot start")
         return
 
-    iface = cfg.sniffer.interface or "eth0"
+    iface = _pick_interface(cfg.sniffer.interface or "eth0")
     bpf = cfg.sniffer.bpf_filter or "tcp port 443 or tcp port 8443"
     flush_secs = cfg.sniffer.flush_interval_seconds or 60
     max_buf = cfg.sniffer.max_buffer_assets or 500
@@ -109,11 +130,11 @@ def run(cfg: Config, probe_version: str, stop_event: threading.Event) -> None:
         logger.warning(
             "WARN: sniffer thread exiting due to error above. "
             "The probe will continue sending heartbeats. "
-            "To disable the sniffer, set passiveSniffer: false in config.yaml and restart."
+            "To disable the sniffer set passiveSniffer: false in config.yaml and restart."
         )
     finally:
-        # Do NOT call stop_event.set() here — a sniffer failure should not
-        # kill the whole probe.  Heartbeats continue; only the sniffer thread exits.
+        # Do NOT call stop_event.set() here — a sniffer failure must not
+        # kill the whole probe.  Heartbeats continue; only this thread exits.
         flush_thread.join(timeout=10)
         _flush(cfg, probe_version, hostname, buf, buf_lock, stats, stats_lock)
         logger.info("INFO: passive sniffer stopped")
