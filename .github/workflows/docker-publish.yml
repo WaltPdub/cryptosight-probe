@@ -13,6 +13,8 @@ on:
   workflow_dispatch:
 
 env:
+  DOCKER_BUILDKIT: 1
+  BUILDKIT_PROGRESS: plain
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/cryptosight-probe
 
