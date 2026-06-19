@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - "**.go"
-      - "go.mod"
+      - "*.py"
+      - "requirements.txt"
       - "Dockerfile"
       - ".github/workflows/docker-publish.yml"
   release:
@@ -17,44 +17,33 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/cryptosight-probe
 
 jobs:
-  compile-check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-python@v5
         with:
-          go-version: '1.22'
-      - name: Install libpcap (required for gopacket CGO bindings)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcap-dev
-      - name: Compile probe
-        env:
-          GONOSUMDB: "*"
-          GONOSUMCHECK: "*"
-          GOFLAGS: "-mod=mod"
-          CGO_ENABLED: "1"
-        run: go build -ldflags="-s -w -X main.version=ci-check" -o /dev/null .
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile main.py probe_config.py assets.py cert_utils.py scanner.py certstore.py sniffer.py sender.py
+      - run: python -c "import probe_config, assets, cert_utils, scanner, certstore, sender; print('OK')"
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: compile-check
+    needs: lint
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Set up QEMU (for multi-arch builds)
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Extract metadata
-        id: meta
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_NAME }}
@@ -63,15 +52,13 @@ jobs:
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: GIT_COMMIT=${{ github.sha }}
+          build-args: PROBE_VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          
