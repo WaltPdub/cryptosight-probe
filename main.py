@@ -57,6 +57,12 @@ def main() -> None:
 
     logger.info("INFO: CryptoSight probe %r starting (version=%s)", cfg.probe.name, VERSION)
 
+    if not cfg.probe.ssl_verify:
+        logger.warning(
+            "WARN: SSL certificate verification is DISABLED (CRYPTOSIGHT_VERIFY_SSL=false). "
+            "Only use this for development or self-signed certificate environments."
+        )
+
     stop_event = threading.Event()
 
     def _shutdown(sig, _frame):
@@ -124,7 +130,10 @@ def _send_heartbeat(cfg: Config) -> None:
     """POST an empty asset list so the server updates lastSeenAt."""
     hostname = socket.gethostname()
     try:
-        sender_mod.send(cfg.probe.endpoint, cfg.probe.api_key, VERSION, hostname, [])
+        sender_mod.send(
+            cfg.probe.endpoint, cfg.probe.api_key, VERSION, hostname, [],
+            ssl_verify=cfg.probe.ssl_verify,
+        )
         logger.info("INFO: heartbeat sent — probe is Online in CryptoSight")
     except Exception as e:
         logger.warning("WARN: heartbeat failed: %s — check endpoint and apiKey in config.yaml", e)
@@ -163,7 +172,10 @@ def _run_cycle(cfg: Config) -> Exception | None:
 
     logger.info("INFO: sending %d asset(s) to %s", len(assets), cfg.probe.endpoint)
     try:
-        resp = sender_mod.send(cfg.probe.endpoint, cfg.probe.api_key, VERSION, hostname, assets)
+        resp = sender_mod.send(
+            cfg.probe.endpoint, cfg.probe.api_key, VERSION, hostname, assets,
+            ssl_verify=cfg.probe.ssl_verify,
+        )
         accepted = resp.get("accepted", 0)
         rejected = resp.get("rejected", 0)
         logger.info("INFO: ingest complete — accepted=%d rejected=%d", accepted, rejected)
