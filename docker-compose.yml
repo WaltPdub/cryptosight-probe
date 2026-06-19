@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  cryptosight-probe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cryptosight/probe:latest
+    restart: unless-stopped
+
+    volumes:
+      # Mount your config.yaml into the container.
+      # Copy config.yaml.example → config.yaml and fill in your probe details.
+      - ./config.yaml:/config/config.yaml:ro
+
+    environment:
+      # Optional: override the config file path (default: /config/config.yaml)
+      # - CONFIG_PATH=/config/config.yaml
+      #
+      # Proxy settings (if your network requires one):
+      # - HTTPS_PROXY=http://proxy.corp.example.com:3128
+      # - NO_PROXY=169.254.0.0/16,10.0.0.0/8
+      []
+
+    # ── Passive sniffer requirements ────────────────────────────────────────
+    # Uncomment ALL THREE blocks below when mode.passiveSniffer: true.
+    #
+    # Why each setting is needed:
+    #   NET_RAW    — open a raw socket for pcap packet capture
+    #   NET_ADMIN  — set the NIC to promiscuous mode
+    #   network_mode: host — the probe must share the host network namespace so
+    #                  it can see traffic on the physical interface; bridge mode
+    #                  only exposes the container's own traffic
+    #   apparmor:unconfined — some distributions block raw sockets via AppArmor
+    #                  even with the capabilities above; remove if not needed
+    #
+    # Do NOT add these settings in production unless mode.passiveSniffer is
+    # active — they expand the container's attack surface.
+    #
+    # cap_add:
+    #   - NET_ADMIN
+    #   - NET_RAW
+    #
+    # security_opt:
+    #   - apparmor:unconfined
+    #
+    # network_mode: host
+
+    # Resource limits — adjust to your environment.
+    # When the passive sniffer is enabled, increase memory to at least 512M for
+    # high-traffic interfaces (the TCP stream reassembler buffers partial flows).
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

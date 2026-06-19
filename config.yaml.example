@@ -1,0 +1,67 @@
+probe:
+  # Logical name for this probe — appears as the source tag in the CryptoSight
+  # inventory (assets are sourced as "probe:<name>").
+  name: "datacenter-east"
+
+  # API key generated on the CryptoSight Probes page.
+  # Keep this value secret — treat it like a password.
+  apiKey: "csp_<paste your key here>"
+
+  # Base URL of your CryptoSight deployment (no trailing slash).
+  endpoint: "https://<your-tenant>.replit.app/api"
+
+scan:
+  # CIDR ranges to scan for TLS endpoints.
+  # Large /8 ranges can take a long time — prefer /24 or /16 for routine scans.
+  networks:
+    - "192.168.1.0/24"
+    - "10.10.0.0/16"
+
+  # TCP ports to probe on each host.
+  ports: [443, 8443, 636, 5671, 8080, 9200, 3269]
+
+  # Maximum simultaneous TCP dial goroutines.
+  concurrency: 50
+
+  # TCP connect + TLS handshake timeout per host:port (seconds).
+  timeoutSeconds: 5
+
+  # Cron expression for scheduled runs (standard 5-field format).
+  # Omit this field (or leave blank) for a one-shot run.
+  schedule: "0 2 * * *"   # daily at 02:00 local time
+
+certStore:
+  # Set to true to also walk local PEM/DER certificate store directories.
+  enabled: true
+  paths:
+    - /etc/ssl/certs
+    - /etc/pki/tls/certs
+    # - /usr/local/share/ca-certificates
+
+mode:
+  # Active TLS scanner — dials each host:port and extracts the cert chain.
+  activeScan: true
+
+  # Passive pcap sniffer — watches live TLS traffic on the wire and extracts
+  # cipher suites, SNI hostnames, and certificates from handshake messages.
+  # Requires NET_ADMIN + NET_RAW capabilities and network_mode: host in
+  # docker-compose.yml (see the comments there).
+  passiveSniffer: false
+
+# ── Passive sniffer settings ─────────────────────────────────────────────────
+# Only used when mode.passiveSniffer: true.
+sniffer:
+  # Network interface to listen on.  Use "any" to capture on all interfaces
+  # (requires root; prefer a specific interface in production).
+  interface: "eth0"
+
+  # libpcap BPF filter — limits which packets the probe processes.
+  # Default captures both standard HTTPS and common internal TLS ports.
+  bpfFilter: "tcp port 443 or tcp port 8443"
+
+  # How often (seconds) accumulated assets are shipped to the CryptoSight API.
+  flushIntervalSeconds: 60
+
+  # Trigger an early flush when the in-memory buffer reaches this many unique
+  # assets (prevents unbounded memory growth on busy interfaces).
+  maxBufferAssets: 500

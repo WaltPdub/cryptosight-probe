@@ -1,0 +1,137 @@
+# Default values for cryptosight-probe.
+# Override with: helm install cryptosight-probe ./helm -f my-values.yaml
+
+# ── Probe identity ────────────────────────────────────────────────────────────
+probe:
+  # Probe name prefix.  Each node appends its hostname: "<namePrefix>-<NODE_NAME>".
+  namePrefix: "k8s"
+
+  # CryptoSight API key.  REQUIRED.
+  # Prefer passing this via --set-string probe.apiKey=csp_... or a values file
+  # that is not committed to source control.
+  # In production, set probe.existingSecret instead (see below).
+  apiKey: ""
+
+  # Endpoint of your CryptoSight instance (no trailing slash).  REQUIRED.
+  endpoint: "https://your-instance.replit.app/api"
+
+  # ── Secret reference ───────────────────────────────────────────────────────
+  # Set existingSecret.name to skip creating the secret from probe.apiKey
+  # and instead reference a pre-existing Kubernetes Secret.
+  # The secret must contain a key named by existingSecret.apiKeyKey.
+  existingSecret:
+    name: ""           # e.g. "cryptosight-probe-secret"
+    apiKeyKey: "apiKey"
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/cryptosight/probe
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets: []
+# - name: registry-secret
+
+# ── Passive sniffer ───────────────────────────────────────────────────────────
+sniffer:
+  # Network interface to capture.  "any" listens on all node interfaces.
+  interface: "any"
+  # libpcap BPF filter applied before TLS parsing.
+  bpfFilter: "tcp port 443 or tcp port 8443 or tcp port 993 or tcp port 636 or tcp port 5671 or tcp port 9200"
+  # Flush captured assets to the API every N seconds.
+  flushIntervalSeconds: 60
+  # Trigger an early flush after N unique assets have accumulated.
+  maxBufferAssets: 500
+
+# ── Active scanner ────────────────────────────────────────────────────────────
+# Disabled by default in DaemonSet mode to avoid redundant scans from every node.
+activeScan:
+  enabled: false
+
+# ── Local certificate store ───────────────────────────────────────────────────
+certStore:
+  enabled: false
+  # When enabled, the node's /etc/ssl is mounted at /host-certs/ssl (read-only)
+  # and these paths are scanned.
+  paths:
+    - "/host-certs/ssl/certs"
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+# Run on all nodes by default, including control-plane nodes.
+# Remove the NoSchedule/NoExecute entries to exclude control-plane.
+tolerations:
+  - operator: Exists
+    effect: NoSchedule
+  - operator: Exists
+    effect: NoExecute
+  - operator: Exists
+    effect: PreferNoSchedule
+
+nodeSelector: {}
+
+affinity: {}
+
+# ── Update strategy ───────────────────────────────────────────────────────────
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+namespaceOverride: ""   # defaults to .Release.Namespace
+
+# createNamespace: when true the chart creates and manages the Namespace as a
+# Helm-tracked resource.  When false (default), create the namespace yourself
+# (kubectl create namespace <ns>) or via Helm's --create-namespace flag before
+# installing — but do NOT combine both; Helm errors if the namespace object
+# already exists and is not owned by this release.
+createNamespace: false
+
+# ── Service account ───────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""              # auto-generated from chart name if empty
+  annotations: {}
+  # EKS IRSA example:
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/cryptosight-probe
+
+# ── Pod-level settings ────────────────────────────────────────────────────────
+podAnnotations: {}
+podLabels: {}
+
+# Additional environment variables injected into the probe container.
+extraEnv: []
+# - name: HTTPS_PROXY
+#   value: "http://proxy.corp.example.com:3128"
+
+# Additional volume mounts (e.g. for custom CA bundles).
+extraVolumeMounts: []
+extraVolumes: []
+
+# ── Security contexts ─────────────────────────────────────────────────────────
+# Main container — NET_RAW + NET_ADMIN are always added for pcap.
+containerSecurityContext:
+  runAsNonRoot: false    # some kernels require root for ambient pcap caps
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
+
+# initContainer that renders the per-node config.
+initContainerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534       # nobody
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]

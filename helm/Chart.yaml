@@ -1,0 +1,29 @@
+apiVersion: v2
+name: cryptosight-probe
+description: >
+  CryptoSight On-Prem Probe — Kubernetes DaemonSet that passively sniffs TLS
+  traffic on every node and ships discovered certificates and cipher suites to
+  the CryptoSight inventory API.
+
+type: application
+
+# Chart version — bump on any change to the chart templates or values schema.
+version: 0.1.0
+
+# Application image version tracked by this chart release.
+appVersion: "latest"
+
+keywords:
+  - cryptography
+  - pqc
+  - tls
+  - sniffer
+  - daemonset
+  - security
+
+home: https://github.com/cryptosight/probe
+sources:
+  - https://github.com/cryptosight/probe
+
+maintainers:
+  - name: CryptoSight

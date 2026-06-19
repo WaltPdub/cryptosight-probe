@@ -1,0 +1,10 @@
+{{- if .Values.createNamespace }}
+{{- if not (eq (include "cryptosight-probe.namespace" .) "default") }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "cryptosight-probe.namespace" . }}
+  labels:
+    {{- include "cryptosight-probe.labels" . | nindent 4 }}
+{{- end }}
+{{- end }}

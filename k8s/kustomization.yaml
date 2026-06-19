@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Apply with: kubectl apply -k probes/cryptosight-probe/k8s/
+#
+# To customise without editing these files, create an overlay directory:
+#   mkdir -p k8s/overlays/production
+#   cat > k8s/overlays/production/kustomization.yaml << 'EOF'
+#   bases:
+#     - ../../k8s
+#   patches:
+#     - path: patch-resources.yaml  # override CPU/memory limits
+#   secretGenerator:
+#     - name: cryptosight-probe-secret
+#       literals:
+#         - apiKey=csp_YOUR_REAL_KEY_HERE
+#   EOF
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - daemonset.yaml
+
+# Uncomment to append a hash suffix to the ConfigMap name so DaemonSet
+# pods automatically roll when the config changes.
+# configMapGenerator: []   # (managed above; hash suffix controlled here)

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cryptosight-probe.fullname" . }}-config
+  namespace: {{ include "cryptosight-probe.namespace" . }}
+  labels:
+    {{- include "cryptosight-probe.labels" . | nindent 4 }}
+data:
+  # Template — the config-init initContainer substitutes ${NODE_NAME} and
+  # ${API_KEY} before the main container starts.
+  config.template.yaml: |
+    probe:
+      name: "{{ .Values.probe.namePrefix }}-${NODE_NAME}"
+      apiKey: "${API_KEY}"
+      endpoint: {{ .Values.probe.endpoint | quote }}
+
+    mode:
+      activeScan: {{ .Values.activeScan.enabled }}
+      passiveSniffer: true
+
+    sniffer:
+      interface: {{ .Values.sniffer.interface | quote }}
+      bpfFilter: {{ .Values.sniffer.bpfFilter | quote }}
+      flushIntervalSeconds: {{ .Values.sniffer.flushIntervalSeconds }}
+      maxBufferAssets: {{ .Values.sniffer.maxBufferAssets }}
+
+    certStore:
+      enabled: {{ .Values.certStore.enabled }}
+      {{- if .Values.certStore.enabled }}
+      paths:
+        {{- range .Values.certStore.paths }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
+    scan:
+      timeoutSeconds: 5
+      concurrency: 50

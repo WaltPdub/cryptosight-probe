@@ -1,0 +1,137 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cryptosight-probe.fullname" . }}
+  namespace: {{ include "cryptosight-probe.namespace" . }}
+  labels:
+    {{- include "cryptosight-probe.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "cryptosight-probe.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cryptosight-probe.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+
+      serviceAccountName: {{ include "cryptosight-probe.serviceAccountName" . }}
+
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      initContainers:
+        - name: config-init
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              sed -e "s/\${NODE_NAME}/$NODE_NAME/g" \
+                  -e "s/\${API_KEY}/$API_KEY/g" \
+                  /template/config.template.yaml > /config/config.yaml
+              echo "Rendered config for node: $NODE_NAME"
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cryptosight-probe.secretName" . }}
+                  key: {{ include "cryptosight-probe.secretApiKeyKey" . }}
+          securityContext:
+            {{- toYaml .Values.initContainerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: config-template
+              mountPath: /template
+              readOnly: true
+            - name: config-rendered
+              mountPath: /config
+
+      containers:
+        - name: cryptosight-probe
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --config
+            - /config/config.yaml
+          securityContext:
+            capabilities:
+              add: [NET_ADMIN, NET_RAW]
+              drop: [ALL]
+            {{- with .Values.containerSecurityContext }}
+            runAsNonRoot: {{ .runAsNonRoot }}
+            readOnlyRootFilesystem: {{ .readOnlyRootFilesystem }}
+            allowPrivilegeEscalation: {{ .allowPrivilegeEscalation }}
+            {{- with .seccompProfile }}
+            seccompProfile:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config-rendered
+              mountPath: /config
+              readOnly: true
+            {{- if .Values.certStore.enabled }}
+            - name: host-certs
+              mountPath: /host-certs/ssl
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+      volumes:
+        - name: config-template
+          configMap:
+            name: {{ include "cryptosight-probe.fullname" . }}-config
+        - name: config-rendered
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        {{- if .Values.certStore.enabled }}
+        - name: host-certs
+          hostPath:
+            path: /etc/ssl
+            type: Directory
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

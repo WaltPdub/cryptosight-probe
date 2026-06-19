@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cryptosight-probe
+  namespace: cryptosight
+  labels:
+    app.kubernetes.io/name: cryptosight-probe
+    app.kubernetes.io/component: probe
+    app.kubernetes.io/version: latest
+  annotations:
+    # Update this annotation to force a rolling restart after ConfigMap changes.
+    # Example: kubectl annotate daemonset cryptosight-probe \
+    #           kubectl.kubernetes.io/restartedAt="$(date -u +%Y-%m-%dT%H:%M:%SZ)" --overwrite
+    kubectl.kubernetes.io/last-applied: ""
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cryptosight-probe
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Update one node at a time — keeps observability gap minimal.
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cryptosight-probe
+        app.kubernetes.io/component: probe
+      annotations:
+        # Rotate this value to trigger a rolling restart without changing
+        # the DaemonSet spec (useful after Secret or ConfigMap updates).
+        # kubectl rollout restart daemonset/cryptosight-probe -n cryptosight
+        prometheus.io/scrape: "false"
+    spec:
+      # ── Node access ─────────────────────────────────────────────────────────
+      # hostNetwork shares the host's network namespace — the probe sees traffic
+      # on physical interfaces rather than only the CNI overlay.
+      hostNetwork: true
+      # Use cluster DNS even under hostNetwork.
+      dnsPolicy: ClusterFirstWithHostNet
+
+      serviceAccountName: cryptosight-probe
+
+      # ── Scheduling ───────────────────────────────────────────────────────────
+      # Run on every node, including control-plane and infra nodes.
+      # Remove the second toleration if you do not want to sniff control-plane
+      # traffic (recommended in most environments).
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+        - operator: Exists
+          effect: PreferNoSchedule
+
+      # Prefer not to run alongside other DaemonSets that also use NET_RAW.
+      # This is a soft preference only — pods will still schedule even if this
+      # cannot be satisfied.
+      # podAntiAffinity: {}   # uncomment and configure if needed
+
+      # ── Init container — render per-node config ────────────────────────────
+      # Substitutes ${NODE_NAME} (and optionally ${API_KEY}) in the config
+      # template and writes the rendered YAML to the shared emptyDir volume.
+      initContainers:
+        - name: config-init
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              sed "s/\${NODE_NAME}/$NODE_NAME/g" \
+                  /template/config.template.yaml > /config/config.yaml
+              echo "Rendered config for node: $NODE_NAME"
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Uncomment and wire to a Secret if you template ${API_KEY}:
+            # - name: API_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: cryptosight-probe-secret
+            #       key: apiKey
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534            # nobody
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: config-template
+              mountPath: /template
+              readOnly: true
+            - name: config-rendered
+              mountPath: /config
+
+      # ── Main container ────────────────────────────────────────────────────
+      containers:
+        - name: cryptosight-probe
+          image: ghcr.io/cryptosight/probe:latest
+          imagePullPolicy: Always
+          args:
+            - --config
+            - /config/config.yaml
+
+          # ── Capabilities ─────────────────────────────────────────────────
+          # NET_RAW:   open a raw packet socket for libpcap
+          # NET_ADMIN: set the NIC to promiscuous mode
+          # These are the minimum required for passive pcap capture.
+          # Do NOT add SYS_ADMIN or privileged: true — they are not needed.
+          securityContext:
+            capabilities:
+              add: [NET_ADMIN, NET_RAW]
+              drop: [ALL]
+            # The probe binary runs as a non-root user; capabilities are
+            # ambient under Linux ≥ 4.3, which all supported K8s versions meet.
+            runAsNonRoot: false         # pcap ambient caps require root on some kernels;
+                                        # test with runAsUser: 65534 if your kernel supports it
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault      # baseline syscall filter; remove only if pcap fails
+
+          # ── Resources ────────────────────────────────────────────────────
+          # Passive sniffer: TCP stream reassembly buffers partial flows in
+          # memory — set memory limit generously on busy interfaces.
+          # CPU is bursty during flush; the limit below handles up to ~50 Mbps
+          # TLS traffic on modern hardware.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          volumeMounts:
+            - name: config-rendered
+              mountPath: /config
+              readOnly: true
+            # Uncomment to scan the node's OS certificate store:
+            # - name: host-certs
+            #   mountPath: /host-certs/ssl
+            #   readOnly: true
+
+      # ── Volumes ───────────────────────────────────────────────────────────
+      volumes:
+        # Read-only ConfigMap template mounted for the initContainer.
+        - name: config-template
+          configMap:
+            name: cryptosight-probe-config
+        # Writable in-memory volume where the initContainer writes the
+        # rendered per-node config.yaml.
+        - name: config-rendered
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # Uncomment to give certStore access to the node's /etc/ssl:
+        # - name: host-certs
+        #   hostPath:
+        #     path: /etc/ssl
+        #     type: Directory
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cryptosight-probe
+  namespace: cryptosight
+  labels:
+    app.kubernetes.io/name: cryptosight-probe
+    app.kubernetes.io/component: probe
+  annotations:
+    # Uncomment to bind an IAM role (EKS IRSA, GKE Workload Identity, etc.)
+    # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/cryptosight-probe
+    # iam.gke.io/gcp-service-account: cryptosight-probe@PROJECT.iam.gserviceaccount.com

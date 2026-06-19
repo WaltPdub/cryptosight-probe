@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cryptosight-probe-config
+  namespace: cryptosight
+  labels:
+    app.kubernetes.io/name: cryptosight-probe
+    app.kubernetes.io/component: config
+data:
+  # config.template.yaml is the raw template.  The DaemonSet's config-init
+  # initContainer substitutes ${NODE_NAME} at pod startup and writes the
+  # rendered file to /config/config.yaml so each node gets a unique probe name.
+  config.template.yaml: |
+    # CryptoSight On-Prem Probe — Kubernetes DaemonSet node configuration
+    # ${NODE_NAME} is replaced at pod startup by the config-init initContainer.
+
+    probe:
+      name: "k8s-${NODE_NAME}"
+      # ─────────────────────────────────────────────────────────────────────
+      # API key — generate one on the Probes page of your CryptoSight instance.
+      #
+      # SECURITY: do not commit a real key here.  In production, store the key
+      # in a Kubernetes Secret and project it into the pod as an environment
+      # variable, then reference it in this template as ${API_KEY}:
+      #
+      #   apiKey: "${API_KEY}"           ← template placeholder
+      #
+      # Then in daemonset.yaml, add to the config-init initContainer env:
+      #
+      #   - name: API_KEY
+      #     valueFrom:
+      #       secretKeyRef:
+      #         name: cryptosight-probe-secret
+      #         key: apiKey
+      # ─────────────────────────────────────────────────────────────────────
+      apiKey: "REPLACE_WITH_YOUR_API_KEY"
+      endpoint: "https://your-instance.replit.app/api"
+
+    mode:
+      # DaemonSet topology: each probe sniffs its node's traffic.
+      # Disable the active scanner to avoid redundant port-scans from every
+      # node — run it on a dedicated single-node probe instead.
+      activeScan: false
+      passiveSniffer: true
+
+    sniffer:
+      # "any" captures all node interfaces (physical, VLAN, CNI overlay).
+      # Set to a specific interface (e.g. "eth0", "ens3") to restrict scope.
+      interface: "any"
+      # Capture TLS on standard and common non-standard ports.
+      bpfFilter: "tcp port 443 or tcp port 8443 or tcp port 993 or tcp port 636 or tcp port 5671 or tcp port 9200"
+      # Ship buffered assets every 60 seconds.
+      flushIntervalSeconds: 60
+      # Trigger an early flush when this many unique assets have accumulated.
+      maxBufferAssets: 500
+
+    certStore:
+      # Enable to scan the node's OS trust store.
+      # Mount /etc/ssl from the host (see hostPath volume in daemonset.yaml).
+      enabled: false
+      paths:
+        - "/host-certs/ssl/certs"
+
+    scan:
+      timeoutSeconds: 5
+      concurrency: 50
