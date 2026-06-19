@@ -2,27 +2,16 @@ services:
     cryptosight-probe:
       image: ghcr.io/waltpdub/cryptosight-probe:latest
       container_name: cryptosight-probe
+      pull_policy: always
       restart: unless-stopped
 
       volumes:
         # Mount your config.yaml into the container.
         # Copy config.yaml.example → config.yaml and fill in your probe details.
-        - ./config.yaml:/app/config.yaml:ro
+        - ./config.yaml:/config/config.yaml:ro
 
       # ── Passive sniffer requirements ────────────────────────────────────────
       # Uncomment ALL THREE blocks below when mode.passiveSniffer: true.
-      #
-      # Why each setting is needed:
-      #   NET_RAW    — open a raw socket for pcap packet capture
-      #   NET_ADMIN  — set the NIC to promiscuous mode
-      #   network_mode: host — the probe must share the host network namespace so
-      #                  it can see traffic on the physical interface; bridge mode
-      #                  only exposes the container's own traffic
-      #   apparmor:unconfined — some distributions block raw sockets via AppArmor
-      #                  even with the capabilities above; remove if not needed
-      #
-      # Do NOT add these settings unless mode.passiveSniffer is active —
-      # they expand the container's attack surface.
       #
       # cap_add:
       #   - NET_ADMIN
