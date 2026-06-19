@@ -146,6 +146,7 @@ def _flush(
             hostname,
             assets,
             sniffer_stats=snap,
+            ssl_verify=cfg.probe.ssl_verify,
         )
         logger.info(
             "INFO: sniffer ingest complete — accepted=%d rejected=%d",
@@ -162,8 +163,6 @@ def _extract_certs_from_payload(payload: bytes, probe_name: str) -> list[Discove
 
     while pos + 5 <= len(payload):
         content_type = payload[pos]
-        # version_major = payload[pos+1]  # unused
-        # version_minor = payload[pos+2]  # unused
         rec_len = struct.unpack_from("!H", payload, pos + 3)[0]
 
         # Sanity check: max TLS record body = 2^14 + 2048.
@@ -212,8 +211,6 @@ def _parse_certificate_message(body: bytes, probe_name: str) -> list[DiscoveredA
     pos = 0
 
     # TLS 1.3: certificate_request_context (1-byte length prefix).
-    # Heuristic: if the first byte is small and the remaining length plausible,
-    # treat as TLS 1.3.  We try TLS 1.3 first, fall back to 1.2 if it fails.
     is_tls13 = False
     ctx_len = body[0]
     tls13_pos = 1 + ctx_len
