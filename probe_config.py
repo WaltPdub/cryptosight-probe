@@ -13,6 +13,7 @@ class ProbeConfig:
     name: str
     api_key: str
     endpoint: str
+    ssl_verify: bool = True
 
 
 @dataclass
@@ -58,10 +59,23 @@ def load(path: str) -> Config:
         raw = yaml.safe_load(f) or {}
 
     p = raw.get("probe", {})
+
+    # ssl_verify: CRYPTOSIGHT_VERIFY_SSL env var takes precedence over
+    # probe.sslVerify in config.yaml.  Set to "false" or "0" to disable
+    # TLS certificate verification (useful for self-signed / dev endpoints).
+    env_verify = os.environ.get("CRYPTOSIGHT_VERIFY_SSL", "").strip().lower()
+    if env_verify in ("false", "0", "no"):
+        ssl_verify = False
+    elif env_verify in ("true", "1", "yes"):
+        ssl_verify = True
+    else:
+        ssl_verify = bool(p.get("sslVerify", True))
+
     probe = ProbeConfig(
         name=p.get("name", ""),
         api_key=p.get("apiKey", ""),
         endpoint=p.get("endpoint", ""),
+        ssl_verify=ssl_verify,
     )
 
     s = raw.get("scan", {})
