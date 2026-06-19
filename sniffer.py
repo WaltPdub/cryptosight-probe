@@ -106,8 +106,14 @@ def run(cfg: Config, probe_version: str, stop_event: threading.Event) -> None:
         )
     except Exception as e:
         logger.error("Sniffer error: %s", e)
+        logger.warning(
+            "WARN: sniffer thread exiting due to error above. "
+            "The probe will continue sending heartbeats. "
+            "To disable the sniffer, set passiveSniffer: false in config.yaml and restart."
+        )
     finally:
-        stop_event.set()
+        # Do NOT call stop_event.set() here — a sniffer failure should not
+        # kill the whole probe.  Heartbeats continue; only the sniffer thread exits.
         flush_thread.join(timeout=10)
         _flush(cfg, probe_version, hostname, buf, buf_lock, stats, stats_lock)
         logger.info("INFO: passive sniffer stopped")
