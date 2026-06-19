@@ -37,6 +37,15 @@ fully compatible).
 
 ---
 
+## Get the probe
+
+```bash
+git clone https://github.com/WaltPdub/cryptosight-probe.git
+cd cryptosight-probe
+```
+
+---
+
 ## Quick start (Docker)
 
 ```bash
@@ -73,7 +82,8 @@ docker run --rm \
 # Alpine:         apk add libpcap-dev gcc musl-dev
 # macOS:          brew install libpcap  (pcap is pre-installed on most macOS)
 
-cd probes/cryptosight-probe
+git clone https://github.com/WaltPdub/cryptosight-probe.git
+cd cryptosight-probe
 go mod tidy                  # generates go.sum, downloads gopacket
 CGO_ENABLED=1 go build -o cryptosight-probe .
 ./cryptosight-probe --config config.yaml
@@ -345,17 +355,18 @@ can see exactly which nodes contributed which findings.
 ### Quick start — kubectl + kustomize
 
 ```bash
-# 1. Clone / copy the k8s/ directory to your local machine
-#    (or reference it directly from the repo)
+# 1. Clone the repo
+git clone https://github.com/WaltPdub/cryptosight-probe.git
+cd cryptosight-probe
 
 # 2. Edit the ConfigMap to set your endpoint
 #    IMPORTANT: replace "REPLACE_WITH_YOUR_API_KEY" with an actual key
 #    generated on the Probes page.  For production, use a Secret instead
 #    (see "Securing the API key" below).
-vim probes/cryptosight-probe/k8s/configmap.yaml
+vim k8s/configmap.yaml
 
 # 3. Apply all resources (creates namespace, ConfigMap, ServiceAccount, DaemonSet)
-kubectl apply -k probes/cryptosight-probe/k8s/
+kubectl apply -k k8s/
 
 # 4. Watch pods come up — one per node
 kubectl get pods -n cryptosight -w
@@ -371,11 +382,15 @@ kubectl logs -n cryptosight daemonset/cryptosight-probe -f
 ### Quick start — Helm
 
 ```bash
+# 0. Clone the repo (skip if already cloned for kustomize)
+git clone https://github.com/WaltPdub/cryptosight-probe.git
+cd cryptosight-probe
+
 # 1. Create the namespace first (chart does not create it by default)
 kubectl create namespace cryptosight
 
 # 2. Install with your API key and endpoint
-helm install cryptosight-probe probes/cryptosight-probe/helm \
+helm install cryptosight-probe helm \
   --namespace cryptosight \
   --set-string probe.apiKey="csp_YOUR_KEY_HERE" \
   --set probe.endpoint="https://your-instance.replit.app/api"
