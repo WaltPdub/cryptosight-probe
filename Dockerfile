@@ -1,44 +1,76 @@
-# ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+name: Build and publish Docker image
 
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-ARG GIT_COMMIT=dev
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "Dockerfile"
+      - ".github/workflows/docker-publish.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
 
-# libpcap-dev + gcc + musl-dev: required for CGO / gopacket pcap bindings
-# git: required for go mod download VCS fetches
-RUN apk add --no-cache ca-certificates libpcap-dev gcc musl-dev git
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/cryptosight-probe
 
-WORKDIR /build
+jobs:
+  compile-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Install libpcap (required for gopacket CGO bindings)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcap-dev
+      - name: Compile probe
+        env:
+          GONOSUMDB: "*"
+          GONOSUMCHECK: "*"
+          GOFLAGS: "-mod=mod"
+          CGO_ENABLED: "1"
+        run: go build -ldflags="-s -w -X main.version=ci-check" -o /dev/null .
 
-# Copy module manifest first for better layer caching.
-COPY go.mod ./
-
-# Download all dependencies.  GONOSUMDB/GONOSUMCHECK skip the checksum
-# database so the build is self-contained with no HTTPS dependency on
-# sum.golang.org.  -mod=mod lets the go tool update go.sum at build time.
-ENV GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-mod=mod
-RUN go mod download
-
-COPY . .
-
-# -s -w strips debug info; -X stamps the git SHA into main.version.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build \
-    -ldflags="-s -w -X main.version=${GIT_COMMIT}" \
-    -o /probe .
-
-# ── Stage 2: minimal Alpine runtime ───────────────────────────────────────────
-FROM alpine:3.19
-
-RUN apk add --no-cache libpcap ca-certificates && \
-    addgroup -S probe && \
-    adduser  -S probe -G probe
-
-COPY --from=builder /probe /probe
-
-VOLUME ["/config"]
-
-USER probe:probe
-
-ENTRYPOINT ["/probe"]
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: compile-check
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
