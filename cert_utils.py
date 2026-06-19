@@ -12,19 +12,30 @@ from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from assets import DiscoveredAsset, is_quantum_vulnerable
 
-_EKU_MAP = {
-    ExtendedKeyUsageOID.SERVER_AUTH: "serverAuth",
-    ExtendedKeyUsageOID.CLIENT_AUTH: "clientAuth",
-    ExtendedKeyUsageOID.CODE_SIGNING: "codeSigning",
-    ExtendedKeyUsageOID.EMAIL_PROTECTION: "emailProtection",
-    ExtendedKeyUsageOID.TIME_STAMPING: "timeStamping",
-    ExtendedKeyUsageOID.OCSP_SIGNING: "OCSPSigning",
-    ExtendedKeyUsageOID.IPSEC_END_SYSTEM: "ipsecEndSystem",
-    ExtendedKeyUsageOID.IPSEC_TUNNEL: "ipsecTunnel",
-    ExtendedKeyUsageOID.IPSEC_USER: "ipsecUser",
-    ExtendedKeyUsageOID.MICROSOFT_SERVER_GATED_CRYPTO: "msServerGatedCrypto",
-    ExtendedKeyUsageOID.NETSCAPE_SERVER_GATED_CRYPTO: "netscapeServerGatedCrypto",
-}
+# Build the EKU map dynamically so missing OIDs in older cryptography
+# versions don't cause an AttributeError at import time.
+def _build_eku_map():
+    _KNOWN = [
+        ("SERVER_AUTH",                   "serverAuth"),
+        ("CLIENT_AUTH",                   "clientAuth"),
+        ("CODE_SIGNING",                  "codeSigning"),
+        ("EMAIL_PROTECTION",              "emailProtection"),
+        ("TIME_STAMPING",                 "timeStamping"),
+        ("OCSP_SIGNING",                  "OCSPSigning"),
+        ("IPSEC_END_SYSTEM",              "ipsecEndSystem"),
+        ("IPSEC_TUNNEL",                  "ipsecTunnel"),
+        ("IPSEC_USER",                    "ipsecUser"),
+        ("MICROSOFT_SERVER_GATED_CRYPTO", "msServerGatedCrypto"),
+        ("NETSCAPE_SERVER_GATED_CRYPTO",  "netscapeServerGatedCrypto"),
+    ]
+    m = {}
+    for attr, label in _KNOWN:
+        oid = getattr(ExtendedKeyUsageOID, attr, None)
+        if oid is not None:
+            m[oid] = label
+    return m
+
+_EKU_MAP = _build_eku_map()
 
 
 def sha256hex(data: bytes) -> str:
