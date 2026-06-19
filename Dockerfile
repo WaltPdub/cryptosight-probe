@@ -1,53 +1,42 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-#
-# The passive sniffer uses google/gopacket which requires CGO and libpcap.
-# We build on golang:1.22-alpine with Alpine's libpcap-dev (musl-based).
-#
-# Note: distroless/static cannot load shared libraries and distroless/cc uses
-# glibc — neither is compatible with Alpine's musl CGO build.  We use
-# alpine:3.19 as the final stage instead; it has a comparable attack surface
-# (non-root user, no interactive shell, minimal package set) and is fully
-# compatible with musl-linked binaries.
 FROM golang:1.22-alpine AS builder
 
-# libpcap-dev : headers + shared library for gopacket/pcap (requires CGO).
-# gcc + musl-dev : C toolchain required to compile CGO code.
-# git            : go mod tidy needs it for VCS-based module fetches.
-# ca-certificates: needed at runtime for outbound HTTPS to the API.
-RUN apk add --no-cache git ca-certificates libpcap-dev gcc musl-dev
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG GIT_COMMIT=dev
+
+# libpcap-dev + gcc + musl-dev: required for CGO / gopacket pcap bindings
+# git: required for go mod download VCS fetches
+RUN apk add --no-cache ca-certificates libpcap-dev gcc musl-dev git
 
 WORKDIR /build
 
-# Copy full source so go mod tidy can inspect all imports.
+# Copy module manifest first for better layer caching.
+COPY go.mod ./
+
+# Download all dependencies.  GONOSUMDB/GONOSUMCHECK skip the checksum
+# database so the build is self-contained with no HTTPS dependency on
+# sum.golang.org.  -mod=mod lets the go tool update go.sum at build time.
+ENV GONOSUMDB=* GONOSUMCHECK=* GOFLAGS=-mod=mod
+RUN go mod download
+
 COPY . .
 
-# Resolve and download all modules (generates go.sum if absent).
-# This keeps the Dockerfile self-contained — no local `go mod tidy` required.
-RUN go mod tidy
-
-# Produce a dynamically-linked Linux/amd64 binary (CGO required for libpcap).
-# -s -w strips symbol table and DWARF to reduce binary size.
-# -X main.version stamps the build-time version string.
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+# -s -w strips debug info; -X stamps the git SHA into main.version.
+RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
-    -ldflags="-s -w -X main.version=docker" \
+    -ldflags="-s -w -X main.version=${GIT_COMMIT}" \
     -o /probe .
 
 # ── Stage 2: minimal Alpine runtime ───────────────────────────────────────────
-#
-# alpine:3.19 with only libpcap and ca-certificates installed.
-# The probe runs as a dedicated non-root user (probe:probe).
 FROM alpine:3.19
 
 RUN apk add --no-cache libpcap ca-certificates && \
     addgroup -S probe && \
     adduser  -S probe -G probe
 
-# Compiled probe binary from the builder stage.
 COPY --from=builder /probe /probe
 
-# Config is supplied at runtime via a volume mount on /config/config.yaml.
-# See docker-compose.yml for the volume definition.
 VOLUME ["/config"]
 
 USER probe:probe
